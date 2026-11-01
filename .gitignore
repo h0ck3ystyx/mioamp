@@ -8,3 +8,10 @@ xcuserdata/
 
 # Local commercial tracks used for manual playback checks; never commit them.
 Tests/Fixtures/Audio/*-taylor_swift-*
+
+# Signing material and local secrets must never enter the public repository.
+*.p12
+*.p8
+*.keychain-db
+.env
+.env.*

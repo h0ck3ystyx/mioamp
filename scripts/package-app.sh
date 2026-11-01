@@ -26,6 +26,7 @@ ditto "$repo_root/MioAmp/Resources/Info.plist" "$app_bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${MIOAMP_BUILD_NUMBER:-1}" "$app_bundle/Contents/Info.plist"
 ditto "$repo_root/MioAmp/Resources/PrivacyInfo.xcprivacy" "$app_bundle/Contents/Resources/PrivacyInfo.xcprivacy"
 ditto "$repo_root/Skins" "$app_bundle/Contents/Resources/Skins"
+ditto "$repo_root/LICENSE" "$app_bundle/Contents/Resources/LICENSE"
 ditto "$repo_root/THIRD-PARTY-NOTICES.md" "$app_bundle/Contents/Resources/THIRD-PARTY-NOTICES.md"
 xcrun actool "$repo_root/MioAmp/Resources/Assets.xcassets" \
   --compile "$app_bundle/Contents/Resources" \

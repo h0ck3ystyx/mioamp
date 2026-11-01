@@ -57,7 +57,11 @@ import Testing
     await seek.value
     await pause.value
     await play.value
-    #expect(await engine.operations.suffix(3) == ["seek-end", "pause", "play"])
+    // Independent Tasks may reach the coordinator in either order. The contract
+    // here is that neither command overtakes the seek, not Task launch ordering.
+    let tail = Array(await engine.operations.suffix(3))
+    #expect(tail.first == "seek-end")
+    #expect(tail.dropFirst().sorted() == ["pause", "play"])
 }
 
 @Test func staleEventsCannotMutatePlaybackAndMatchingTransitionCommits() async throws {

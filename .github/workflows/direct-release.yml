@@ -1,0 +1,92 @@
+name: Signed direct release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Marketing version (for example 1.0.0)'
+        required: true
+        default: '1.0.0'
+      build_number:
+        description: 'Next unused positive build number'
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: mioamp-direct-release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      MIOAMP_VERSION: ${{ inputs.version }}
+      MIOAMP_BUILD_NUMBER: ${{ inputs.build_number }}
+      NOTARY_PROFILE: MioAmp-CI
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          [[ "$MIOAMP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$MIOAMP_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]
+      - name: Configure signing
+        shell: bash
+        env:
+          APPLICATION_CERT_BASE64: ${{ secrets.APPLICATION_CERT_BASE64 }}
+          INSTALLER_CERT_BASE64: ${{ secrets.INSTALLER_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.CERT_PASSWORD }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_APP_PASSWORD: ${{ secrets.NOTARY_APP_PASSWORD }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in APPLICATION_CERT_BASE64 INSTALLER_CERT_BASE64 CERT_PASSWORD NOTARY_APPLE_ID NOTARY_APP_PASSWORD NOTARY_TEAM_ID; do
+            [[ -n "${!name}" ]] || { echo "Missing Actions secret: $name" >&2; exit 1; }
+          done
+          KEYCHAIN_PATH="$RUNNER_TEMP/mioamp-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$HOME/Library/Keychains/login.keychain-db"
+          printf '%s' "$APPLICATION_CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/mioamp-app.p12"
+          printf '%s' "$INSTALLER_CERT_BASE64" | base64 --decode > "$RUNNER_TEMP/mioamp-installer.p12"
+          for cert in "$RUNNER_TEMP/mioamp-app.p12" "$RUNNER_TEMP/mioamp-installer.p12"; do
+            security import "$cert" -k "$KEYCHAIN_PATH" -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign -T /usr/bin/productbuild
+          done
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          rm -f "$RUNNER_TEMP/mioamp-app.p12" "$RUNNER_TEMP/mioamp-installer.p12"
+          APP_IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1)
+          INSTALLER_IDENTITY=$(security find-identity -v -p basic "$KEYCHAIN_PATH" | sed -n 's/.*"\(Developer ID Installer: [^"]*\)".*/\1/p' | head -1)
+          echo "APPLICATION_IDENTITY=$APP_IDENTITY" >> "$GITHUB_ENV"
+          echo "INSTALLER_IDENTITY=$INSTALLER_IDENTITY" >> "$GITHUB_ENV"
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_APP_PASSWORD"
+      - name: Test, build, sign, notarize and verify both installer domains
+        run: ./release.sh
+      - name: Create draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          OUT="build/releases/$MIOAMP_VERSION-$MIOAMP_BUILD_NUMBER"
+          grep -Fx 'Signed, notarized, stapled, and Gatekeeper-assessed.' "$OUT/STATUS.txt"
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Signed and notarized universal Mac build. Requires macOS 14 or later.
+
+          - Installer: choose **Install for me only** for `~/Applications`, or **Install for all users** for `/Applications` with administrator authorization. Use **Change Install Location…** if needed.
+          - ZIP: extract the app and move it into `~/Applications` for installation without administrator rights.
+          - Verify downloads with `SHA256SUMS`.
+
+          Before publishing, test a fresh installation and an upgrade in both domains, including a standard non-admin account.
+          NOTES
+          gh release create "v$MIOAMP_VERSION-build.$MIOAMP_BUILD_NUMBER" --draft --target "$GITHUB_SHA" \
+            --title "MioAmp $MIOAMP_VERSION (build $MIOAMP_BUILD_NUMBER)" --notes-file "$RUNNER_TEMP/release-notes.md" \
+            "$OUT/MioAmp-$MIOAMP_VERSION.pkg" "$OUT/MioAmp-$MIOAMP_VERSION.zip" "$OUT/SHA256SUMS"
+      - name: Remove signing material
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/mioamp-app.p12" "$RUNNER_TEMP/mioamp-installer.p12"
+          if [[ -n "${KEYCHAIN_PATH:-}" ]]; then security delete-keychain "$KEYCHAIN_PATH" || true; fi
+          security delete-generic-password -s 'com.apple.gke.notary.tool' -a "$NOTARY_PROFILE" >/dev/null 2>&1 || true
