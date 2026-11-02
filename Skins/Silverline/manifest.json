@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "mioamp.silverline",
+  "name": "Silverline",
+  "author": "MioAmp Project",
+  "version": "1.0.0",
+  "license": "Original vector artwork created for MioAmp; distributed with MioAmp.",
+  "colors": {
+    "color.window.background": "#58667B",
+    "color.display.background": "#163C78",
+    "color.text.primary": "#F4F8FF",
+    "color.text.secondary": "#DEE9FA",
+    "color.accent": "#99D9FF",
+    "color.border": "#CAD5E5"
+  },
+  "fonts": {
+    "font.track": "system-monospaced",
+    "font.technical": "system-monospaced",
+    "font.controls": "system"
+  },
+  "assets": {
+    "asset.window.frame": "art/frame.svg",
+    "asset.transport.play": "art/play.svg",
+    "asset.transport.pause": "art/pause.svg",
+    "asset.transport.previous": "art/previous.svg",
+    "asset.transport.stop": "art/stop.svg",
+    "asset.transport.next": "art/next.svg"
+  }
+}
